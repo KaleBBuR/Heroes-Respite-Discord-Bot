@@ -1,30 +1,33 @@
 pub mod db;
 pub mod party_groups;
 
-use std::{collections::HashSet, env};
+use std::{collections::HashSet, convert::TryFrom, env, time::Duration, thread};
 use serenity::{
     async_trait,
+    builder::CreateEmbedAuthor,
     client::Client,
+    collector::ReactionAction,
     framework::standard::{
         Args, CommandResult, StandardFramework,
         macros::*,
     },
+    futures::StreamExt,
     http::Http,
-    model::{
-        channel::Message,
-        gateway::Ready,
-        guild::{Guild, GuildUnavailable}
-    },
-    prelude::*
+    model::prelude::*,
+    prelude::*,
+    utils::Colour
 };
 use mongodb::{Client as ClientDB, options::ClientOptions};
 use db::Database;
 use crate::db::DatabaseServer;
+use crate::party_groups::Group;
 
 /*
  * Thank you Kara-b
  * https://github.com/kara-b/kbot_rust/tree/01bbbec4c1ce6497e58141e0495441c5f446bd18
  */
+
+const THUMBS_UP: &str = "👍";
 
 struct Handler;
 
@@ -70,6 +73,10 @@ impl EventHandler for Handler {
             id as i64,
             Some(owner_id as i64)
         ).await;
+    }
+
+    async fn reaction_add(&self, _ctx: Context, _add_reaction: Reaction) {
+        todo!()
     }
 
     // Set a handler to be called on the `ready` event. This is called when a
@@ -190,6 +197,172 @@ async fn main() {
 // So you would have to react with the emoji under it to get the role to access the private voice
 // chat for the party.
 // I can make it so people can't react to it anymore after the specified amount of players
-async fn create(_ctx: &Context, _msg: &Message, _args: Args) -> CommandResult {
-    todo!()
+async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    let title = args.single::<String>()?;
+    let player_amount = args.single::<u32>()?;
+    let game = args.single::<String>()?;
+
+    let guild = msg.guild_id.unwrap();
+    let party_role = guild.create_role(ctx.http.clone(), |er| {
+        er.name(title.clone())
+            .mentionable(true)
+    }).await;
+
+    if player_amount < 20 {
+        match party_role {
+            Ok(role) => {
+                let party_role_id = role.id;
+                let party_channel_permissions = Some(PermissionOverwrite {
+                    allow: Permissions::READ_MESSAGES,
+                    deny: Permissions::SEND_TTS_MESSAGES,
+                    kind: PermissionOverwriteType::Role(party_role_id)
+                });
+
+                let party_text_channel = guild.create_channel(&ctx.http, |cc| {
+                        cc.name(&title)
+                            .kind(ChannelType::Text)
+                            .permissions(party_channel_permissions.clone())
+                            .topic(format!("A party created for: {}", game))
+                }).await;
+
+                match party_text_channel {
+                    Ok(guild_text_channel) => {
+                        let guild_text_channel_id = guild_text_channel.id;
+                        let party_text_channel = guild.create_channel(&ctx.http, |cc| {
+                            cc.name(&title)
+                                .kind(ChannelType::Voice)
+                                .user_limit(player_amount)
+                                .permissions(party_channel_permissions.clone())
+                        }).await;
+
+                        match party_text_channel {
+                            Ok(guild_voice_channel) => {
+                                let guild_voice_channel_id = guild_voice_channel.id;
+                                let embed_message = msg.channel_id.send_message(&ctx.http, |cm| {
+                                    cm.embed(|ce| {
+                                        let mut author = CreateEmbedAuthor::default();
+                                        let avatar_url = msg.author.avatar_url().unwrap();
+                                        author.icon_url(&avatar_url);
+                                        author.name(&title);
+                                        ce.description(
+                                            format!("This is a party created for! -> {}", game)
+                                        );
+                                        ce.set_author(author);
+                                        ce.thumbnail(&avatar_url);
+                                        ce.colour(Colour::DARK_ORANGE);
+                                        ce.field("Playes", "", true);
+                                        ce
+                                    });
+                                    cm
+                                }).await;
+                                match embed_message {
+                                    Ok(msg) => {
+                                        msg.react(
+                                            &ctx.http,
+                                            ReactionType::try_from(THUMBS_UP).unwrap()
+                                        ).await.unwrap();
+
+                                        let mut party_group_struct = Group::new(
+                                            msg.author.id.0 as usize,
+                                            player_amount as usize,
+                                            title,
+                                            game
+                                        );
+
+                                        let collector = &mut msg
+                                            .await_reactions(&ctx)
+                                            .timeout(Duration::from_secs(1))
+                                            .await;
+
+                                        while let Some(action) = collector.next().await {
+                                            let user_id = &action
+                                                .as_inner_ref()
+                                                .user_id
+                                                .unwrap();
+                                            let user = user_id.to_user(&ctx.http).await;
+                                            let id = user_id.0 as usize;
+                                            match user {
+                                                Ok(_) => {
+                                                    let emoji = &action.as_inner_ref().emoji;
+                                                    match emoji.as_data().as_str() {
+                                                        THUMBS_UP => {
+                                                            if !party_group_struct
+                                                            .in_player_vec(&id)
+                                                            {
+                                                                party_group_struct
+                                                                .add_player(id);
+                                                            }
+                                                        },
+                                                        _ => {}
+                                                    }
+                                                },
+                                                Err(why) => {
+                                                    return_error_embed(ctx, &msg, why).await?;
+                                                }
+                                            }
+                                        }
+                                    },
+                                    Err(why) => {
+                                        return_error_embed(ctx, &msg, why).await?
+                                    }
+                                }
+                            },
+                            Err(why) => {
+                                return_error_embed(ctx, &msg, why).await?
+                            }
+                        }
+                    },
+                    Err(why) => {
+                        return_error_embed(ctx, &msg, why).await?
+                    }
+                }
+            },
+            Err(why) => {
+                return_error_embed(ctx, &msg, why).await?
+            }
+        };
+    } else {
+        msg.channel_id.send_message(&ctx.http, |cm| {
+            cm.content("The player limit must be under 20!");
+            cm
+        }).await?;
+    }
+
+    Ok(())
+}
+
+async fn return_error_embed(ctx: &Context, msg: &Message, error: serenity::Error) -> CommandResult {
+    let mut count = 0;
+    loop {
+        if count == 3 { break }
+        let bot_info = &ctx.http.get_current_application_info().await;
+        match bot_info {
+            Ok(info) => {
+                let bot_id = info.id.0;
+                let avatar_url = &ctx.http.get_user(bot_id).await.unwrap().avatar_url().unwrap();
+                let _ = msg.channel_id.send_message(&ctx.http, |cm| {
+                    cm.embed(|ce| {
+                        let mut author = CreateEmbedAuthor::default();
+                        author.icon_url(avatar_url);
+                        author.name("ERROR ERROR");
+                        ce.set_author(author);
+                        ce.thumbnail(&avatar_url);
+                        ce.colour(Colour::RED);
+                        ce.field("Error", error.to_string(), true);
+                        ce
+                    });
+                    cm
+                }).await?;
+                break
+            },
+            Err(_) => {
+                let time = Duration::from_secs(1);
+                thread::sleep(time);
+                count += 1;
+                continue;
+            }
+        };
+    }
+
+    Ok(())
 }

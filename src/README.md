@@ -1,3 +1,3 @@
-# Heroes' Respite Discord Bot
+# Heroes' Respite Discord Bot Commands
 
 **TODO**
