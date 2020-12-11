@@ -6,7 +6,6 @@ use serenity::{
     async_trait,
     builder::CreateEmbedAuthor,
     client::Client,
-    collector::ReactionAction,
     framework::standard::{
         Args, CommandResult, StandardFramework,
         macros::*,
@@ -75,10 +74,6 @@ impl EventHandler for Handler {
         ).await;
     }
 
-    async fn reaction_add(&self, _ctx: Context, _add_reaction: Reaction) {
-        todo!()
-    }
-
     // Set a handler to be called on the `ready` event. This is called when a
     // shard is booted, and a READY payload is sent by Discord. This payload
     // contains data like the current user's guild Ids, current user data,
@@ -86,7 +81,7 @@ impl EventHandler for Handler {
     //
     // In this case, just print what the current user's username is.
     async fn ready(&self, _: Context, ready: Ready) {
-        eprint!("\nNAME: {} is connected!\nID: {}", ready.user.name, ready.user.id);
+        eprint!("\nNAME: {} is connected!\nID: {}\n", ready.user.name, ready.user.id);
     }
 }
 
@@ -121,7 +116,6 @@ async fn main() {
                     .with_whitespace(true)
                     .on_mention(Some(bot_id))
                     .prefix(">?")
-                    .delimiters(vec![", ", ","])
                     .allow_dm(false)
                     .ignore_bots(true)
                     .owners(owners))
@@ -191,6 +185,7 @@ async fn main() {
 }
 
 #[command]
+#[aliases(c)]
 // It asks for the amount of players and and title of the lobby.
 // It would make the title of the lobby the voice chat.
 // So it would create a new role referencing the private party.
@@ -198,9 +193,9 @@ async fn main() {
 // chat for the party.
 // I can make it so people can't react to it anymore after the specified amount of players
 async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    let title = args.single::<String>()?;
-    let player_amount = args.single::<u32>()?;
+    let player_amount = args.single::<f64>()? as u32;
     let game = args.single::<String>()?;
+    let title = String::from(args.rest());
 
     let guild = msg.guild_id.unwrap();
     let party_role = guild.create_role(ctx.http.clone(), |er| {
@@ -238,131 +233,182 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                         match party_text_channel {
                             Ok(guild_voice_channel) => {
                                 let guild_voice_channel_id = guild_voice_channel.id;
-                                let embed_message = msg.channel_id.send_message(&ctx.http, |cm| {
+                                let mut embed_message = msg.channel_id.send_message(&ctx.http, |cm| {
                                     cm.embed(|ce| {
                                         let mut author = CreateEmbedAuthor::default();
                                         let avatar_url = msg.author.avatar_url().unwrap();
                                         author.icon_url(&avatar_url);
                                         author.name(&title);
-                                        ce.description(
-                                            format!("This is a party created for! -> {}", game)
+                                        let desc = format!(
+                                            "This is a party created by {}", msg.author.name
                                         );
+                                        ce.description(desc);
                                         ce.set_author(author);
                                         ce.thumbnail(&avatar_url);
-                                        ce.colour(Colour::DARK_ORANGE);
-                                        ce.field("Playes", "", true);
+                                        ce.colour(Colour::DARK_GOLD);
+                                        ce.field("Players", "None", true);
                                         ce
                                     });
                                     cm
-                                }).await;
-                                match embed_message {
-                                    Ok(msg) => {
-                                        msg.react(
-                                            &ctx.http,
-                                            ReactionType::try_from(THUMBS_UP).unwrap()
-                                        ).await.unwrap();
+                                }).await?;
 
-                                        let mut party_group_struct = Group::new(
-                                            msg.author.id.0 as usize,
-                                            player_amount as usize,
-                                            title,
-                                            game
-                                        );
+                                embed_message.react(
+                                    &ctx.http,
+                                    ReactionType::try_from(THUMBS_UP).unwrap()
+                                ).await?;
 
-                                        let collector = &mut msg
-                                            .await_reactions(&ctx)
-                                            .timeout(Duration::from_secs(1))
-                                            .await;
+                                eprintln!("death...");
 
-                                        while let Some(action) = collector.next().await {
-                                            let user_id = &action
-                                                .as_inner_ref()
-                                                .user_id
-                                                .unwrap();
-                                            let user = user_id.to_user(&ctx.http).await;
-                                            let id = user_id.0 as usize;
-                                            match user {
-                                                Ok(_) => {
-                                                    let emoji = &action.as_inner_ref().emoji;
-                                                    match emoji.as_data().as_str() {
-                                                        THUMBS_UP => {
-                                                            if !party_group_struct
-                                                            .in_player_vec(&id)
-                                                            {
-                                                                party_group_struct
-                                                                .add_player(id);
-                                                            }
-                                                        },
-                                                        _ => {}
-                                                    }
-                                                },
-                                                Err(why) => {
-                                                    return_error_embed(ctx, &msg, why).await?;
-                                                }
+                                let mut party_group_struct = Group::new(
+                                    msg.author.id.0 as usize,
+                                    player_amount as usize,
+                                    title.clone(),
+                                    game
+                                );
+
+                                eprintln!("PLS");
+
+                                let mut add_reac_collector = msg
+                                    .await_reactions(&ctx)
+                                    .await;
+
+                                eprintln!("REEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE");
+
+                                while let Some(action) = add_reac_collector.next().await {
+                                    eprintln!("START");
+                                    let user_id = &action
+                                        .as_inner_ref()
+                                        .user_id
+                                        .unwrap();
+                                    let user = user_id.to_user(&ctx.http).await?;
+                                    let id = user_id.0 as usize;
+                                    let emoji = &action.as_inner_ref().emoji;
+                                    eprintln!("CMON");
+                                    match emoji.as_data().as_str() {
+                                        THUMBS_UP => {
+                                            if action.is_added() && !party_group_struct.in_player_vec(&id)
+                                            {
+                                                party_group_struct.add_player(id);
+                                                party_group_struct
+                                                .add_player_name(user.name);
+                                                &ctx.http.add_member_role(
+                                                    guild.0,
+                                                    id as u64,
+                                                    party_role_id.0
+                                                );
+                                                embed_message.edit(&ctx.http, |em| {
+                                                    em.embed(|ce| {
+                                                        let mut author = CreateEmbedAuthor::default();
+                                                        let avatar_url = msg.author.avatar_url().unwrap();
+                                                        eprintln!("url: {}", avatar_url);
+                                                        author.icon_url(&avatar_url);
+                                                        author.name(&title);
+                                                        let desc = format!(
+                                                            "This is a party created by {}", msg.author.name
+                                                        );
+                                                        ce.description(desc);
+                                                        ce.set_author(author);
+                                                        ce.thumbnail(&avatar_url);
+                                                        ce.colour(Colour::DARK_GOLD);
+                                                        ce.field("Players", party_group_struct.players(), true);
+                                                        ce
+                                                    });
+                                                    em
+                                                }).await?;
                                             }
-                                        }
-                                    },
-                                    Err(why) => {
-                                        return_error_embed(ctx, &msg, why).await?
+                                            else if action.is_removed() &&
+                                            party_group_struct.in_player_vec(&id)
+                                            {
+                                                party_group_struct
+                                                    .remove_player(id);
+                                                party_group_struct
+                                                .remove_player_name(user.name);
+                                                &ctx.http.remove_member_role(
+                                                    guild.0,
+                                                    id as u64,
+                                                    party_role_id.0
+                                                );
+                                                embed_message.edit(&ctx.http, |em| {
+                                                    em.embed(|ce| {
+                                                        let mut author = CreateEmbedAuthor::default();
+                                                        let avatar_url = msg.author.avatar_url().unwrap();
+                                                        eprintln!("url: {}", avatar_url);
+                                                        author.icon_url(&avatar_url);
+                                                        author.name(&title);
+                                                        let desc = format!(
+                                                            "This is a party created by {}", msg.author.name
+                                                        );
+                                                        ce.description(desc);
+                                                        ce.set_author(author);
+                                                        ce.thumbnail(&avatar_url);
+                                                        ce.colour(Colour::DARK_GOLD);
+                                                        ce.field("Players", party_group_struct.players(), true);
+                                                        ce
+                                                    });
+                                                    em
+                                                }).await?;
+                                            }
+                                        },
+                                        _ => {}
                                     }
                                 }
                             },
                             Err(why) => {
+                                eprintln!("ERROR 3");
                                 return_error_embed(ctx, &msg, why).await?
                             }
                         }
                     },
                     Err(why) => {
+                        eprintln!("ERROR 4");
                         return_error_embed(ctx, &msg, why).await?
                     }
                 }
             },
             Err(why) => {
+                eprintln!("ERROR 5");
                 return_error_embed(ctx, &msg, why).await?
             }
         };
     } else {
-        msg.channel_id.send_message(&ctx.http, |cm| {
-            cm.content("The player limit must be under 20!");
+        let msg = msg.channel_id.send_message(&ctx.http, |cm| {
+            cm.embed(|ce| {
+                ce.title("Player limit must be under 20 players!!!");
+                ce.colour(Colour::RED);
+                ce
+            });
             cm
         }).await?;
+
+        thread::sleep(Duration::from_secs(20));
+        msg.delete(&ctx.http).await?;
     }
 
     Ok(())
 }
 
 async fn return_error_embed(ctx: &Context, msg: &Message, error: serenity::Error) -> CommandResult {
-    let mut count = 0;
-    loop {
-        if count == 3 { break }
-        let bot_info = &ctx.http.get_current_application_info().await;
-        match bot_info {
-            Ok(info) => {
-                let bot_id = info.id.0;
-                let avatar_url = &ctx.http.get_user(bot_id).await.unwrap().avatar_url().unwrap();
-                let _ = msg.channel_id.send_message(&ctx.http, |cm| {
-                    cm.embed(|ce| {
-                        let mut author = CreateEmbedAuthor::default();
-                        author.icon_url(avatar_url);
-                        author.name("ERROR ERROR");
-                        ce.set_author(author);
-                        ce.thumbnail(&avatar_url);
-                        ce.colour(Colour::RED);
-                        ce.field("Error", error.to_string(), true);
-                        ce
-                    });
-                    cm
-                }).await?;
-                break
-            },
-            Err(_) => {
-                let time = Duration::from_secs(1);
-                thread::sleep(time);
-                count += 1;
-                continue;
-            }
-        };
-    }
+    let bot_info = match ctx.http.get_current_user().await {
+        Ok(bot_info) => bot_info,
+        Err(why) => { eprintln!("Could not get bot info: {}", why); return Err(Box::new(why)) }
+    };
+
+    let avatar_url = bot_info.avatar_url().unwrap();
+
+    let _ = msg.channel_id.send_message(&ctx.http, |cm| {
+        cm.embed(|ce| {
+            let mut author = CreateEmbedAuthor::default();
+            author.icon_url(&avatar_url);
+            author.name("ERROR ERROR");
+            ce.set_author(author);
+            ce.thumbnail(&avatar_url);
+            ce.colour(Colour::RED);
+            ce.field("Error", error.to_string(), true);
+            ce
+        });
+        cm
+    }).await?;
+
 
     Ok(())
 }

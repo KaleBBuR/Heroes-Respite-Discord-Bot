@@ -4,6 +4,7 @@ use serde::{Serialize, Deserialize};
 pub(crate) struct Group {
     party_owner: usize,
     current_players: Vec<usize>,
+    player_names: Vec<String>,
     player_amount: usize,
     max_players: usize,
     description: String,
@@ -32,6 +33,10 @@ impl Group {
         self.player_amount += 1;
     }
 
+    pub(crate) fn add_player_name(&mut self, player_name: String) {
+        self.player_names.push(player_name);
+    }
+
     pub(crate) fn remove_player(&mut self, player: usize) {
         // O(n)
         // NOTE: This vector could also be sorted in the future, in which we can find the player id
@@ -41,6 +46,15 @@ impl Group {
             if *curr_player == player {
                 self.current_players.remove(i);
                 self.player_amount -= 1;
+                break
+            }
+        }
+    }
+
+    pub(crate) fn remove_player_name(&mut self, player_name: String) {
+        for (i, curr_player) in self.player_names.iter().enumerate() {
+            if *curr_player == player_name {
+                self.current_players.remove(i);
                 break
             }
         }
@@ -66,6 +80,18 @@ impl Group {
     pub(crate) fn set_owner(&mut self, owner: usize) {
         self.party_owner = owner;
     }
+
+    pub(crate) fn players(&self) -> String {
+        let current_string: String = self.player_names
+            .iter()
+            .map(|x| { x.clone().push_str(", "); x.to_owned() })
+            .collect();
+
+        current_string
+            .strip_suffix(", ")
+            .unwrap()
+            .to_string()
+    }
 }
 
 impl Default for Group {
@@ -73,6 +99,7 @@ impl Default for Group {
         Self {
             party_owner: 0,
             current_players: Vec::new(),
+            player_names: Vec::new(),
             player_amount: 0,
             max_players: 0,
             description: String::new(),
