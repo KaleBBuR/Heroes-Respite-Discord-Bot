@@ -201,6 +201,11 @@ async fn main() {
 // chat for the party.
 // I can make it so people can't react to it anymore after the specified amount of players
 async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    // TODO: Check for deletion of the text or voice channel/role
+    // TODO: Update the database for everytime a player is removed/added.
+    // TODO: When the bot turns off it removes all the party/groups
+    // GOTO: async fn stop
+
     let player_amount = args.single::<f64>()? as u32;
     let game = args.single::<String>()?;
     let title = String::from(args.rest());
@@ -440,5 +445,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
 #[command]
 async fn stop(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    // TODO: Make the bot turn off
+    // TODO: Remove all parties/groups from database, and in the server.
     unimplemented!()
 }
