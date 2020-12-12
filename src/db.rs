@@ -17,7 +17,8 @@ pub(crate) struct DatabaseServer {
     // Fields
     _id: i64,
     owner_id: i64,
-    current_groups: Vec<Group>
+    current_groups: Vec<Group>,
+    party_owners: Vec<i64>
 }
 
 impl TypeMapKey for Database {
@@ -37,7 +38,8 @@ impl DatabaseServer {
                 DatabaseServer::insert_or_replace(ctx, DatabaseServer {
                     _id,
                     owner_id: owner_id.unwrap(),
-                    current_groups: Vec::new()
+                    current_groups: Vec::new(),
+                    party_owners: Vec::new()
                 }).await
             ).unwrap()
         } else {
@@ -67,10 +69,17 @@ impl DatabaseServer {
 
         let collection = DatabaseServer::get_collection(ctx).await;
         // Find and replace the document and return it
-        match collection.find_one_and_replace(doc! { "_id": database_guild._id }, new_document, replace_options).await.unwrap() {
+        match collection.find_one_and_replace(
+            doc! { "_id": database_guild._id },
+            new_document,
+            replace_options
+        ).await.unwrap() {
             Some(document) => document,
             None => {
-                collection.find_one(doc! { "_id": database_guild._id }, None)
+                collection.find_one(
+                    doc! { "_id": database_guild._id },
+                    None
+                )
                 .await
                 .unwrap()
                 .unwrap()
@@ -96,5 +105,30 @@ impl DatabaseServer {
             .database(&mongo_database);
 
         database.collection("Servers")
+    }
+
+    pub(crate) async fn party_owner(ctx: &Context, _id: i64, party_owner_id: i64) -> bool {
+        let dbs = DatabaseServer::get_or_insert_new(ctx, _id, None).await;
+        for curr_party_owner in dbs.party_owners {
+            if curr_party_owner == party_owner_id {
+                return true
+            }
+        }
+
+        false
+    }
+
+    pub(crate) async fn add_party(&mut self, party_group: Group) {
+        self.current_groups.push(party_group);
+    }
+
+    pub(crate) async fn edit_party(&mut self, party_group: Group) {
+        for (i, curr_group) in self.current_groups.iter().enumerate() {
+            if curr_group.party_owner == party_group.party_owner {
+                self.current_groups.remove(i);
+                self.current_groups.push(party_group);
+                break
+            }
+        }
     }
 }

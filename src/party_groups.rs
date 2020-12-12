@@ -1,43 +1,56 @@
 use serde::{Serialize, Deserialize};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Group {
-    party_owner: usize,
-    current_players: Vec<usize>,
+    pub party_owner: i64,
+    current_players: Vec<i64>,
     player_names: Vec<String>,
-    player_amount: usize,
-    max_players: usize,
+    player_amount: i64,
+    max_players: i64,
     description: String,
     title: String,
     game: String,
-    pub time_til_auto_del: usize
+    voice_id: i64,
+    text_id: i64,
+    role_id: i64,
+    pub time_til_auto_del: i64
 }
 
 impl Group {
-    pub(crate) fn new<S: Into<String>>(
-        owner: usize,
-        max_players: usize,
+    pub(crate) async fn new<S: Into<String>>(
+        owner: i64,
+        max_players: i64,
         title: S,
-        game: S
+        game: S,
+        voice: i64,
+        text: i64,
+        role: i64
     ) -> Self {
         let mut group = Self::default();
         group.set_owner(owner);
         group.max_players(max_players);
         group.set_game(game);
         group.set_title(title);
+        group.set_voice_id(voice);
+        group.set_text_id(text);
+        group.set_role_id(role);
         group
     }
 
-    pub(crate) fn add_player(&mut self, player: usize) {
+    pub(crate) fn full(&self) -> bool {
+        if self.player_amount == self.max_players { true } else { false }
+    }
+
+    pub(crate) async fn add_player(&mut self, player: i64) {
         self.current_players.push(player);
         self.player_amount += 1;
     }
 
-    pub(crate) fn add_player_name(&mut self, player_name: String) {
+    pub(crate) async fn add_player_name(&mut self, player_name: String) {
         self.player_names.push(player_name);
     }
 
-    pub(crate) fn remove_player(&mut self, player: usize) {
+    pub(crate) async fn remove_player(&mut self, player: i64) {
         // O(n)
         // NOTE: This vector could also be sorted in the future, in which we can find the player id
         // in O(log(n)) time, but since most of the time the party will not be so many players
@@ -51,16 +64,16 @@ impl Group {
         }
     }
 
-    pub(crate) fn remove_player_name(&mut self, player_name: String) {
+    pub(crate) async fn remove_player_name(&mut self, player_name: String) {
         for (i, curr_player) in self.player_names.iter().enumerate() {
             if *curr_player == player_name {
-                self.current_players.remove(i);
+                self.player_names.remove(i);
                 break
             }
         }
     }
 
-    pub(crate) fn in_player_vec(&self, player: &usize) -> bool {
+    pub(crate) fn in_player_vec(&self, player: &i64) -> bool {
         for curr_player in self.current_players.iter() { if curr_player == player { return true } }
         false
     }
@@ -73,24 +86,40 @@ impl Group {
         self.title = game.into();
     }
 
-    pub(crate) fn max_players(&mut self, players: usize) {
+    pub(crate) fn max_players(&mut self, players: i64) {
         self.max_players = players;
     }
 
-    pub(crate) fn set_owner(&mut self, owner: usize) {
+    pub(crate) fn set_owner(&mut self, owner: i64) {
         self.party_owner = owner;
     }
 
+    pub(crate) fn set_voice_id(&mut self, id: i64) {
+        self.voice_id = id;
+    }
+
+    pub(crate) fn set_text_id(&mut self, id: i64) {
+        self.text_id = id;
+    }
+
+    pub(crate) fn set_role_id(&mut self, id: i64) {
+        self.role_id = id;
+    }
+
     pub(crate) fn players(&self) -> String {
-        let current_string: String = self.player_names
-            .iter()
-            .map(|x| { x.clone().push_str(", "); x.to_owned() })
+        if self.player_names.len() == 0 { "None".to_string() }
+        else {
+            let current_string: String = self.player_names
+            .clone()
+            .into_iter()
+            .map(|mut x| { x.push_str(", "); x })
             .collect();
 
         current_string
             .strip_suffix(", ")
             .unwrap()
             .to_string()
+        }
     }
 }
 
@@ -105,6 +134,9 @@ impl Default for Group {
             description: String::new(),
             title: String::new(),
             game: String::new(),
+            voice_id: 0,
+            text_id: 0,
+            role_id: 0,
             time_til_auto_del: 0
         }
     }
