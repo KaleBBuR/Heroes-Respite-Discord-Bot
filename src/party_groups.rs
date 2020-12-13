@@ -7,7 +7,6 @@ pub(crate) struct Group {
     player_names: Vec<String>,
     player_amount: i64,
     max_players: i64,
-    description: String,
     title: String,
     game: String,
     voice_id: i64,
@@ -83,7 +82,7 @@ impl Group {
     }
 
     pub(crate) fn set_game<G: Into<String>>(&mut self, game: G) {
-        self.title = game.into();
+        self.game = game.into();
     }
 
     pub(crate) fn max_players(&mut self, players: i64) {
@@ -131,7 +130,6 @@ impl Default for Group {
             player_names: Vec::new(),
             player_amount: 0,
             max_players: 0,
-            description: String::new(),
             title: String::new(),
             game: String::new(),
             voice_id: 0,

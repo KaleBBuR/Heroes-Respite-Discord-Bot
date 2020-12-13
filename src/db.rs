@@ -10,7 +10,7 @@ use crate::party_groups::Group;
 
 pub struct Database;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 // You need to return a Struct when getting information from the MongoDB Database, and this will be
 // the struct that will implement all the fields for the bot.
 pub(crate) struct DatabaseServer {
@@ -116,6 +116,10 @@ impl DatabaseServer {
         }
 
         false
+    }
+
+    pub(crate) async fn add_party_owner(&mut self, id: i64) {
+        self.party_owners.push(id);
     }
 
     pub(crate) async fn add_party(&mut self, party_group: Group) {

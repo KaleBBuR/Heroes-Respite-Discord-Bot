@@ -7,7 +7,7 @@ use serenity::{
     builder::CreateEmbedAuthor,
     client::Client,
     framework::standard::{
-        Args, CommandResult, StandardFramework, CommandError
+        Args, CommandResult, StandardFramework,
         macros::*,
     },
     futures::StreamExt,
@@ -273,7 +273,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                 cc.name(&title)
                     .kind(ChannelType::Text)
                     .permissions(perms.clone())
-                    .topic(format!("A Group Party created by: {}", ))
+                    .topic(format!("A Group Party created by: {}", author.name))
         }).await?;
 
         let party_text_id = party_text_channel.id;
@@ -307,7 +307,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         ).await?;
 
         let mut group_data = Group::new(
-            msg.author.id.0 as i64,
+            author.id.0 as i64,
             player_amount as i64,
             title.clone(),
             game,
@@ -318,6 +318,8 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
         let mut server_data = DatabaseServer::get_or_insert_new(ctx, guild.0 as i64, None).await;
         server_data.add_party(group_data.clone()).await;
+        server_data.add_party_owner(group_data.party_owner).await;
+        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
 
         let mut add_reac_collector = embed_message
             .await_reactions(&ctx)
@@ -359,6 +361,8 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                             id as u64
                         ).await?;
                         member.add_role(&ctx.http, party_role_id).await?;
+                        server_data.edit_party(group_data.clone()).await;
+                        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
                         embed_message.edit(&ctx.http, |em| {
                             em.embed(|ce| {
                                 let mut author_embed = CreateEmbedAuthor::default();
@@ -393,6 +397,8 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                             id as u64
                         ).await?;
                         member.remove_role(&ctx.http, party_role_id).await?;
+                        server_data.edit_party(group_data.clone()).await;
+                        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
                         embed_message.edit(&ctx.http, |em| {
                             em.embed(|ce| {
                                 let mut author_embed = CreateEmbedAuthor::default();
@@ -444,7 +450,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 }
 
 #[command]
-async fn stop(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+async fn stop(_ctx: &Context, _msg: &Message, mut _args: Args) -> CommandResult {
     // TODO: Make the bot turn off
     // TODO: Remove all parties/groups from database, and in the server.
     unimplemented!()
