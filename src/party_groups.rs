@@ -2,16 +2,16 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct Group {
-    pub party_owner: i64,
+    pub owner: i64,
     current_players: Vec<i64>,
     player_names: Vec<String>,
     player_amount: i64,
     max_players: i64,
     title: String,
     game: String,
-    voice_id: i64,
-    text_id: i64,
-    role_id: i64,
+    pub voice_id: i64,
+    pub text_id: i64,
+    pub role_id: i64,
     pub time_til_auto_del: i64
 }
 
@@ -77,31 +77,31 @@ impl Group {
         false
     }
 
-    pub(crate) fn set_title<T: Into<String>>(&mut self, title: T) {
+    fn set_owner(&mut self, owner: i64) {
+        self.owner = owner;
+    }
+
+    fn set_title<T: Into<String>>(&mut self, title: T) {
         self.title = title.into();
     }
 
-    pub(crate) fn set_game<G: Into<String>>(&mut self, game: G) {
+    fn set_game<G: Into<String>>(&mut self, game: G) {
         self.game = game.into();
     }
 
-    pub(crate) fn max_players(&mut self, players: i64) {
+    fn max_players(&mut self, players: i64) {
         self.max_players = players;
     }
 
-    pub(crate) fn set_owner(&mut self, owner: i64) {
-        self.party_owner = owner;
-    }
-
-    pub(crate) fn set_voice_id(&mut self, id: i64) {
+    fn set_voice_id(&mut self, id: i64) {
         self.voice_id = id;
     }
 
-    pub(crate) fn set_text_id(&mut self, id: i64) {
+    fn set_text_id(&mut self, id: i64) {
         self.text_id = id;
     }
 
-    pub(crate) fn set_role_id(&mut self, id: i64) {
+    fn set_role_id(&mut self, id: i64) {
         self.role_id = id;
     }
 
@@ -120,12 +120,16 @@ impl Group {
             .to_string()
         }
     }
+
+    pub(crate) fn player_amount(&self) -> usize {
+        self.player_amount as usize
+    }
 }
 
 impl Default for Group {
     fn default() -> Self {
         Self {
-            party_owner: 0,
+            owner: 0,
             current_players: Vec::new(),
             player_names: Vec::new(),
             player_amount: 0,

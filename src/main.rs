@@ -201,12 +201,8 @@ async fn main() {
 // chat for the party.
 // I can make it so people can't react to it anymore after the specified amount of players
 async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
-    // TODO: Check for deletion of the text or voice channel/role
-    // TODO: Update the database for everytime a player is removed/added.
-    // TODO: When the bot turns off it removes all the party/groups
-    // GOTO: async fn stop
-
     let player_amount = args.single::<f64>()? as u32;
+
     let game = args.single::<String>()?;
     let title = String::from(args.rest());
 
@@ -215,8 +211,42 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
 
     let author = &msg.author;
 
+    if player_amount > 20 {
+        let error_msg = channel.send_message(&ctx.http, |cm| {
+            cm.embed(|ce| {
+                ce.title("Player limit must be under 20 players!");
+                ce.colour(Colour::RED);
+                ce
+            });
+            cm
+        }).await?;
+
+        thread::sleep(Duration::from_secs(20));
+        error_msg.delete(&ctx.http).await?;
+        msg.delete(&ctx.http).await?;
+
+        return Ok(())
+    }
+
+    if player_amount < 2 {
+        let error_msg = channel.send_message(&ctx.http, |cm| {
+            cm.embed(|ce| {
+                ce.title("The party must be at least 2 players.");
+                ce.colour(Colour::RED);
+                ce
+            });
+            cm
+        }).await?;
+
+        thread::sleep(Duration::from_secs(20));
+        error_msg.delete(&ctx.http).await?;
+        msg.delete(&ctx.http).await?;
+
+        return Ok(())
+    }
+
     if DatabaseServer::party_owner(ctx, guild.0 as i64, author.id.0 as i64).await {
-        let msg = channel.send_message(&ctx.http, |cm| {
+        let error_msg = channel.send_message(&ctx.http, |cm| {
             cm.embed(|ce| {
                 ce.title("You already have a party created!");
                 ce.colour(Colour::RED);
@@ -226,6 +256,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         }).await?;
 
         thread::sleep(Duration::from_secs(20));
+        error_msg.delete(&ctx.http).await?;
         msg.delete(&ctx.http).await?;
 
         return Ok(())
@@ -248,202 +279,188 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             .mentionable(true)
     }).await?;
 
-    if player_amount < 20 {
-        let party_role_id = party_role.id;
-        let everyone_id = RoleId::from(guild.0);
+    let party_role_id = party_role.id;
+    let everyone_id = RoleId::from(guild.0);
 
-        let mut allow = Permissions::empty();
-        allow.insert(Permissions::READ_MESSAGES);
-        allow.insert(Permissions::SEND_MESSAGES);
+    let mut allow = Permissions::empty();
+    allow.insert(Permissions::READ_MESSAGES);
+    allow.insert(Permissions::SEND_MESSAGES);
 
-        let perms = vec![
-            PermissionOverwrite {
-                allow: Permissions::empty(),
-                deny: Permissions::all(),
-                kind: PermissionOverwriteType::Role(everyone_id),
-            },
-            PermissionOverwrite {
-                allow: allow,
-                deny: Permissions::empty(),
-                kind: PermissionOverwriteType::Role(party_role_id),
-            }
-        ];
+    let perms = vec![
+        PermissionOverwrite {
+            allow: Permissions::empty(),
+            deny: Permissions::all(),
+            kind: PermissionOverwriteType::Role(everyone_id),
+        },
+        PermissionOverwrite {
+            allow: allow,
+            deny: Permissions::empty(),
+            kind: PermissionOverwriteType::Role(party_role_id),
+        }
+    ];
 
-        let party_text_channel = guild.create_channel(&ctx.http, |cc| {
-                cc.name(&title)
-                    .kind(ChannelType::Text)
-                    .permissions(perms.clone())
-                    .topic(format!("A Group Party created by: {}", author.name))
-        }).await?;
-
-        let party_text_id = party_text_channel.id;
-        let party_voice_channel = guild.create_channel(&ctx.http, |cc| {
+    let party_text_channel = guild.create_channel(&ctx.http, |cc| {
             cc.name(&title)
-                .kind(ChannelType::Voice)
-                .user_limit(player_amount)
+                .kind(ChannelType::Text)
                 .permissions(perms.clone())
-        }).await?;
+                .topic(format!("A Group Party created by: {}", author.name))
+    }).await?;
 
-        let party_voice_id = party_voice_channel.id;
-        let mut embed_message = channel.send_message(&ctx.http, |cm| {
-            cm.embed(|ce| {
-                let mut author_embed = CreateEmbedAuthor::default();
-                author_embed.icon_url(&avatar_url);
-                author_embed.name(&title);
-                let desc = format!("This is a party created by {}", author.name);
-                ce.description(desc);
-                ce.set_author(author_embed);
-                ce.thumbnail(&avatar_url);
-                ce.colour(Colour::DARK_GOLD);
-                ce.field("Players", "None", true);
-                ce
-            });
-            cm
-        }).await?;
+    let party_text_id = party_text_channel.id;
+    let party_voice_channel = guild.create_channel(&ctx.http, |cc| {
+        cc.name(&title)
+            .kind(ChannelType::Voice)
+            .user_limit(player_amount)
+            .permissions(perms.clone())
+    }).await?;
 
-        embed_message.react(
-            &ctx.http,
-            ReactionType::try_from(THUMBS_UP).unwrap()
-        ).await?;
+    let party_voice_id = party_voice_channel.id;
+    let mut embed_message = channel.send_message(&ctx.http, |cm| {
+        cm.embed(|ce| {
+            let mut author_embed = CreateEmbedAuthor::default();
+            author_embed.icon_url(&avatar_url);
+            author_embed.name(&title);
+            let desc = format!("This is a party created by {}", author.name);
+            ce.description(desc);
+            ce.set_author(author_embed);
+            ce.thumbnail(&avatar_url);
+            ce.colour(Colour::DARK_GOLD);
+            ce.field("Players", "None", true);
+            ce
+        });
+        cm
+    }).await?;
 
-        let mut group_data = Group::new(
-            author.id.0 as i64,
-            player_amount as i64,
-            title.clone(),
-            game,
-            party_voice_id.0 as i64,
-            party_text_id.0 as i64,
-            party_role_id.0 as i64
-        ).await;
+    embed_message.react(
+        &ctx.http,
+        ReactionType::try_from(THUMBS_UP).unwrap()
+    ).await?;
 
-        let mut server_data = DatabaseServer::get_or_insert_new(ctx, guild.0 as i64, None).await;
-        server_data.add_party(group_data.clone()).await;
-        server_data.add_party_owner(group_data.party_owner).await;
-        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+    let party_owner = author.id.0 as i64;
+    let mut group_data = Group::new(
+        party_owner,
+        player_amount as i64,
+        title.clone(),
+        game,
+        party_voice_id.0 as i64,
+        party_text_id.0 as i64,
+        party_role_id.0 as i64
+    ).await;
 
-        let mut add_reac_collector = embed_message
-            .await_reactions(&ctx)
-            .removed(true)
-            .await;
+    let mut server_data = DatabaseServer::get_or_insert_new(ctx, guild.0 as i64, None).await;
+    server_data.add_party(group_data.clone()).await;
+    DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
 
-        while let Some(action) = add_reac_collector.next().await {
-            let user_id = &action
-                .as_inner_ref()
-                .user_id
-                .unwrap();
-            let user = user_id.to_user(&ctx.http).await?;
-            let id = user_id.0;
-            let emoji = &action.as_inner_ref().emoji;
+    let mut add_reac_collector = embed_message
+        .await_reactions(&ctx)
+        .removed(true)
+        .await;
 
-            if group_data.full() {
+    while let Some(action) = add_reac_collector.next().await {
+        let user_id = &action
+            .as_inner_ref()
+            .user_id
+            .unwrap();
+        let user = user_id.to_user(&ctx.http).await?;
+        let id = user_id.0;
+        let emoji = &action.as_inner_ref().emoji;
+
+        if group_data.full() {
+            &ctx.http.delete_reaction(
+                channel.0,
+                msg.id.0,
+                Some(user.id.0),
+                emoji
+            ).await?;
+
+            continue
+        }
+
+        match emoji.as_data().as_str() {
+            THUMBS_UP => {
+                if action.is_added() && !group_data.in_player_vec(&(id as i64)) {
+                    group_data.add_player(id as i64).await;
+                    group_data.add_player_name(user.name.clone()).await;
+                    &ctx.http.add_member_role(
+                        guild.0,
+                        id as u64,
+                        party_role_id.0
+                    );
+                    let mut member = guild.member(
+                        &ctx.http,
+                        id as u64
+                    ).await?;
+                    member.add_role(&ctx.http, party_role_id).await?;
+                    server_data.edit_party(&party_owner, group_data.clone()).await;
+                    DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+                    embed_message.edit(&ctx.http, |em| {
+                        em.embed(|ce| {
+                            let mut author_embed = CreateEmbedAuthor::default();
+                            author_embed.icon_url(&avatar_url);
+                            author_embed.name(&title);
+                            let desc = format!("This is a party created by {}", author.name);
+                            ce.description(desc);
+                            ce.set_author(author_embed);
+                            ce.thumbnail(&avatar_url);
+                            ce.colour(Colour::DARK_GOLD);
+                            ce.field(
+                                "Players",
+                                group_data.players(),
+                                true
+                            );
+                            ce
+                        });
+                        em
+                    }).await?;
+                } else if action.is_removed() && group_data.in_player_vec(&(id as i64)) {
+                    group_data.remove_player(id as i64).await;
+                    group_data.remove_player_name(user.name.clone()).await;
+                    &ctx.http.remove_member_role(
+                        guild.0,
+                        id as u64,
+                        party_role_id.0
+                    );
+                    let mut member = guild.member(
+                        &ctx.http,
+                        id as u64
+                    ).await?;
+                    member.remove_role(&ctx.http, party_role_id).await?;
+                    server_data.edit_party(&party_owner, group_data.clone()).await;
+                    DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+                    embed_message.edit(&ctx.http, |em| {
+                        em.embed(|ce| {
+                            let mut author_embed = CreateEmbedAuthor::default();
+                            author_embed.icon_url(&avatar_url);
+                            author_embed.name(&title);
+                            let desc = format!("This is a party created by {}", author.name);
+                            ce.description(desc);
+                            ce.set_author(author_embed);
+                            ce.thumbnail(&avatar_url);
+                            ce.colour(Colour::DARK_GOLD);
+                            ce.field(
+                                "Players",
+                                group_data.players(),
+                                true
+                            );
+                            ce
+                        });
+                        em
+                    }).await?;
+
+                    if group_data.player_amount() < 2 {
+                        // TODO: Delete channel, role, and voice.
+                    }
+                }
+            },
+            _ => {
                 &ctx.http.delete_reaction(
                     channel.0,
                     msg.id.0,
                     Some(user.id.0),
                     emoji
                 ).await?;
-
-                continue
-            }
-
-            match emoji.as_data().as_str() {
-                THUMBS_UP => {
-                    if action.is_added() && !group_data.in_player_vec(&(id as i64)) {
-                        group_data.add_player(id as i64).await;
-                        group_data.add_player_name(user.name.clone()).await;
-                        &ctx.http.add_member_role(
-                            guild.0,
-                            id as u64,
-                            party_role_id.0
-                        );
-                        let mut member = guild.member(
-                            &ctx.http,
-                            id as u64
-                        ).await?;
-                        member.add_role(&ctx.http, party_role_id).await?;
-                        server_data.edit_party(group_data.clone()).await;
-                        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
-                        embed_message.edit(&ctx.http, |em| {
-                            em.embed(|ce| {
-                                let mut author_embed = CreateEmbedAuthor::default();
-                                author_embed.icon_url(&avatar_url);
-                                author_embed.name(&title);
-                                let desc = format!(
-                                    "This is a party created by {}", author.name
-                                );
-                                ce.description(desc);
-                                ce.set_author(author_embed);
-                                ce.thumbnail(&avatar_url);
-                                ce.colour(Colour::DARK_GOLD);
-                                ce.field(
-                                    "Players",
-                                    group_data.players(),
-                                    true
-                                );
-                                ce
-                            });
-                            em
-                        }).await?;
-                    } else if action.is_removed() && group_data.in_player_vec(&(id as i64)) {
-                        group_data.remove_player(id as i64).await;
-                        group_data.remove_player_name(user.name.clone()).await;
-                        &ctx.http.remove_member_role(
-                            guild.0,
-                            id as u64,
-                            party_role_id.0
-                        );
-                        let mut member = guild.member(
-                            &ctx.http,
-                            id as u64
-                        ).await?;
-                        member.remove_role(&ctx.http, party_role_id).await?;
-                        server_data.edit_party(group_data.clone()).await;
-                        DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
-                        embed_message.edit(&ctx.http, |em| {
-                            em.embed(|ce| {
-                                let mut author_embed = CreateEmbedAuthor::default();
-                                author_embed.icon_url(&avatar_url);
-                                author_embed.name(&title);
-                                let desc = format!(
-                                    "This is a party created by {}", author.name
-                                );
-                                ce.description(desc);
-                                ce.set_author(author_embed);
-                                ce.thumbnail(&avatar_url);
-                                ce.colour(Colour::DARK_GOLD);
-                                ce.field(
-                                    "Players",
-                                    group_data.players(),
-                                    true
-                                );
-                                ce
-                            });
-                            em
-                        }).await?;
-                    }
-                },
-                _ => {
-                    &ctx.http.delete_reaction(
-                        channel.0,
-                        msg.id.0,
-                        Some(user.id.0),
-                        emoji
-                    ).await?;
-                }
             }
         }
-    } else {
-        let msg = channel.send_message(&ctx.http, |cm| {
-            cm.embed(|ce| {
-                ce.title("Player limit must be under 20 players!");
-                ce.colour(Colour::RED);
-                ce
-            });
-            cm
-        }).await?;
-
-        thread::sleep(Duration::from_secs(20));
-        msg.delete(&ctx.http).await?;
     }
 
     Ok(())

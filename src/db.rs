@@ -17,8 +17,7 @@ pub(crate) struct DatabaseServer {
     // Fields
     _id: i64,
     owner_id: i64,
-    current_groups: Vec<Group>,
-    party_owners: Vec<i64>
+    pub parties: Vec<Group>,
 }
 
 impl TypeMapKey for Database {
@@ -38,8 +37,7 @@ impl DatabaseServer {
                 DatabaseServer::insert_or_replace(ctx, DatabaseServer {
                     _id,
                     owner_id: owner_id.unwrap(),
-                    current_groups: Vec::new(),
-                    party_owners: Vec::new()
+                    parties: Vec::new()
                 }).await
             ).unwrap()
         } else {
@@ -109,28 +107,19 @@ impl DatabaseServer {
 
     pub(crate) async fn party_owner(ctx: &Context, _id: i64, party_owner_id: i64) -> bool {
         let dbs = DatabaseServer::get_or_insert_new(ctx, _id, None).await;
-        for curr_party_owner in dbs.party_owners {
-            if curr_party_owner == party_owner_id {
-                return true
-            }
-        }
-
+        for party in dbs.parties { if party.owner == party_owner_id { return true } }
         false
     }
 
-    pub(crate) async fn add_party_owner(&mut self, id: i64) {
-        self.party_owners.push(id);
+    pub(crate) async fn add_party(&mut self, group: Group) {
+        self.parties.push(group);
     }
 
-    pub(crate) async fn add_party(&mut self, party_group: Group) {
-        self.current_groups.push(party_group);
-    }
-
-    pub(crate) async fn edit_party(&mut self, party_group: Group) {
-        for (i, curr_group) in self.current_groups.iter().enumerate() {
-            if curr_group.party_owner == party_group.party_owner {
-                self.current_groups.remove(i);
-                self.current_groups.push(party_group);
+    pub(crate) async fn edit_party(&mut self, owner: &i64, party_group: Group) {
+        for (i, party) in self.parties.iter().enumerate() {
+            if &party.owner == owner {
+                self.parties.swap_remove(i);
+                self.parties.push(party_group);
                 break
             }
         }
