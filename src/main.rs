@@ -1,13 +1,13 @@
 pub mod db;
 pub mod party_groups;
 
-use std::{collections::HashSet, convert::TryFrom, env, fmt, time::Duration};
+use std::{collections::{HashSet, HashMap}, convert::TryFrom, env, fmt, time::Duration};
 use serenity::{
     async_trait,
     builder::CreateEmbedAuthor,
     client::Client,
     framework::standard::{
-        Args, CommandResult, StandardFramework,
+        Args, CommandResult, StandardFramework, DispatchError,
         macros::*,
     },
     futures::StreamExt,
@@ -27,6 +27,12 @@ use crate::party_groups::Group;
  */
 
 const THUMBS_UP: &str = "👍";
+
+struct CommandCounter;
+
+impl TypeMapKey for CommandCounter {
+    type Value = HashMap<String, u64>;
+}
 
 enum PartyError {
     NoGame,
@@ -158,24 +164,19 @@ async fn main() {
     // application if you are fine using nightly Rust.
     // If not, we need to provide the function identifiers to the
     // hook-functions (before, after, normal, ...).
-        // TODO
-        // .before(before)
+        .before(before)
     // Similar to `before`, except will be called directly _after_
     // command execution.
-        // TODO
-        // .after(after)
+        .after(after)
     // Set a function that's called whenever an attempted command-call's
     // command could not be found.
-        // TODO
-        // .unrecognised_command(unknown_command)
+        .unrecognised_command(unknown_command)
     // Set a function that's called whenever a message is not a command.
-        // TODO
-        // .normal_message(normal_message)
+        .normal_message(normal_message)
     // Set a function that's called whenever a command's execution didn't complete for one
     // reason or another. For example, when a user has exceeded a rate-limit or a command
     // can only be performed by the bot owner.
-        // TODO
-        // .on_dispact_error(dispach_error)
+        .on_dispatch_error(dispatch_error)
         .group(&PARTY_GROUP);
 
     // Create a new instance of the Client, logging in as a bot. This will
@@ -550,4 +551,47 @@ async fn stop(_ctx: &Context, _msg: &Message, mut _args: Args) -> CommandResult 
     // TODO: Make the bot turn off
     // TODO: Remove all parties/groups from database, and in the server.
     unimplemented!()
+}
+
+#[hook]
+async fn before(ctx: &Context, msg: &Message, command_name: &str) -> bool {
+    println!("Got command '{}' by user '{}'", command_name, msg.author.name);
+
+    // Increment the number of times this command has been run once. If
+    // the command's name does not exist in the counter, add a default
+    // value of 0.
+    let mut data = ctx.data.write().await;
+    let counter = data.get_mut::<CommandCounter>().expect("Expected CommandCounter in TypeMap.");
+    let entry = counter.entry(command_name.to_string()).or_insert(0);
+    *entry += 1;
+
+    true // if `before` returns false, command processing doesn't happen.
+}
+
+#[hook]
+async fn after(_ctx: &Context, _msg: &Message, command_name: &str, command_result: CommandResult) {
+    match command_result {
+        Ok(()) => println!("Processed command '{}'", command_name),
+        Err(why) => println!("Command '{}' returned error {:?}", command_name, why),
+    }
+}
+
+#[hook]
+async fn unknown_command(_ctx: &Context, _msg: &Message, unknown_command_name: &str) {
+    println!("Could not find command named '{}'", unknown_command_name);
+}
+
+#[hook]
+async fn normal_message(_ctx: &Context, msg: &Message) {
+    println!("Message is not a command '{}'", msg.content);
+}
+
+#[hook]
+async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
+    if let DispatchError::Ratelimited(duration) = error {
+        let _ = msg
+            .channel_id
+            .say(&ctx.http, &format!("Try this again in {} seconds.", duration.as_secs()))
+            .await;
+    }
 }
