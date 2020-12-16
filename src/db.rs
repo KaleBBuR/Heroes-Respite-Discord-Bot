@@ -118,8 +118,27 @@ impl DatabaseServer {
     pub(crate) async fn edit_party(&mut self, owner: &i64, party_group: Group) {
         for (i, party) in self.parties.iter().enumerate() {
             if &party.owner == owner {
-                self.parties.swap_remove(i);
+                self.parties.remove(i);
                 self.parties.push(party_group);
+                break
+            }
+        }
+    }
+
+    pub(crate) async fn get_party(&self, owner: &i64) -> Option<Group> {
+        for party in self.parties.iter() {
+            if &party.owner == owner {
+                return Some(party.clone())
+            }
+        }
+
+        None
+    }
+
+    pub(crate) async fn delete_party(&mut self, owner: &i64) {
+        for (i, party) in self.parties.iter().enumerate() {
+            if &party.owner == owner {
+                self.parties.remove(i);
                 break
             }
         }

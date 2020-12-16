@@ -1,7 +1,7 @@
 pub mod db;
 pub mod party_groups;
 
-use std::{collections::HashSet, convert::TryFrom, env, time::Duration, thread};
+use std::{collections::HashSet, convert::TryFrom, env, fmt, sync::{Arc, Mutex}, time::Duration};
 use serenity::{
     async_trait,
     builder::CreateEmbedAuthor,
@@ -27,6 +27,32 @@ use crate::party_groups::Group;
  */
 
 const THUMBS_UP: &str = "👍";
+
+enum PartyError {
+    NoGame,
+    NoTitle,
+    TooManyPeople,
+    TooLittlePeople,
+    PartyOwner
+}
+
+impl fmt::Display for PartyError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match *self {
+            PartyError::NoGame => write!(f, "No game has been entered!"),
+            PartyError::NoTitle => write!(f, "No title has been entered!"),
+            PartyError::TooManyPeople => write!(f, "Can not have over 20 people per party!"),
+            PartyError::TooLittlePeople => write!(f, "Can't have a party with less than 2 people!"),
+            PartyError::PartyOwner => write!(f, "You already own a party. HMPH. NO MORE FOR YOU.")
+        }
+    }
+}
+
+pub struct PartyTimer;
+
+impl TypeMapKey for PartyTimer {
+    type Value = Arc<Mutex<u32>>;
+}
 
 struct Handler;
 
@@ -87,8 +113,9 @@ impl EventHandler for Handler {
     // private channels, and more.
     //
     // In this case, just print what the current user's username is.
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         eprint!("\nNAME: {} is connected!\nID: {}\n", ready.user.name, ready.user.id);
+        ctx.set_activity(Activity::playing("Makin' Parties!")).await;
     }
 }
 
@@ -180,6 +207,7 @@ async fn main() {
         let client = ClientDB::with_options(db_client_ops).expect("Could not connect to DB");
         let mut data = bot_client.data.write().await;
         data.insert::<Database>(client);
+        data.insert::<PartyTimer>(Arc::new(Mutex::new(1)));
     }
 
     // Finally, start a single shard, and start listening to events.
@@ -203,8 +231,19 @@ async fn main() {
 async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let player_amount = args.single::<f64>()? as u32;
 
-    let game = args.single::<String>()?;
+    let game = match args.single::<String>() {
+        Ok(game) => game,
+        Err(_) => {
+            error_builder(ctx, msg, msg.channel_id, PartyError::NoGame).await?;
+            return Ok(())
+        }
+    };
     let title = String::from(args.rest());
+
+    if title == "" {
+        error_builder(ctx, msg, msg.channel_id, PartyError::NoTitle).await?;
+        return Ok(())
+    }
 
     let guild = msg.guild_id.unwrap();
     let channel = msg.channel_id;
@@ -212,53 +251,17 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
     let author = &msg.author;
 
     if player_amount > 20 {
-        let error_msg = channel.send_message(&ctx.http, |cm| {
-            cm.embed(|ce| {
-                ce.title("Player limit must be under 20 players!");
-                ce.colour(Colour::RED);
-                ce
-            });
-            cm
-        }).await?;
-
-        thread::sleep(Duration::from_secs(20));
-        error_msg.delete(&ctx.http).await?;
-        msg.delete(&ctx.http).await?;
-
+        error_builder(ctx, msg, channel, PartyError::TooManyPeople).await?;
         return Ok(())
     }
 
     if player_amount < 2 {
-        let error_msg = channel.send_message(&ctx.http, |cm| {
-            cm.embed(|ce| {
-                ce.title("The party must be at least 2 players.");
-                ce.colour(Colour::RED);
-                ce
-            });
-            cm
-        }).await?;
-
-        thread::sleep(Duration::from_secs(20));
-        error_msg.delete(&ctx.http).await?;
-        msg.delete(&ctx.http).await?;
-
+        error_builder(ctx, msg, channel, PartyError::TooLittlePeople).await?;
         return Ok(())
     }
 
     if DatabaseServer::party_owner(ctx, guild.0 as i64, author.id.0 as i64).await {
-        let error_msg = channel.send_message(&ctx.http, |cm| {
-            cm.embed(|ce| {
-                ce.title("You already have a party created!");
-                ce.colour(Colour::RED);
-                ce
-            });
-            cm
-        }).await?;
-
-        thread::sleep(Duration::from_secs(20));
-        error_msg.delete(&ctx.http).await?;
-        msg.delete(&ctx.http).await?;
-
+        error_builder(ctx, msg, channel, PartyError::PartyOwner).await?;
         return Ok(())
     }
 
@@ -356,6 +359,14 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
         .removed(true)
         .await;
 
+    let ctx1 = ctx.clone();
+    let msg1 = msg.clone();
+    let msg2 = embed_message.clone();
+
+    tokio::spawn(async move {
+        handle_party_timer(&ctx1, guild, &party_owner, channel.0, &msg1, &msg2).await;
+    });
+
     while let Some(action) = add_reac_collector.next().await {
         let user_id = &action
             .as_inner_ref()
@@ -427,6 +438,7 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                     member.remove_role(&ctx.http, party_role_id).await?;
                     server_data.edit_party(&party_owner, group_data.clone()).await;
                     DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+
                     embed_message.edit(&ctx.http, |em| {
                         em.embed(|ce| {
                             let mut author_embed = CreateEmbedAuthor::default();
@@ -446,10 +458,6 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
                         });
                         em
                     }).await?;
-
-                    if group_data.player_amount() < 2 {
-                        // TODO: Delete channel, role, and voice.
-                    }
                 }
             },
             _ => {
@@ -462,6 +470,84 @@ async fn create(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
             }
         }
     }
+
+    Ok(())
+}
+
+async fn handle_party_timer(
+    ctx: &Context,
+    guild: GuildId,
+    owner: &i64,
+    channel_id: u64,
+    user_message: &Message,
+    bot_message: &Message
+) -> CommandResult {
+    let mut timer = tokio::time::interval(Duration::from_secs(60));
+
+    loop {
+        timer.tick().await;
+
+        let mut server_data = DatabaseServer::get_or_insert_new(ctx, guild.0 as i64, None).await;
+        let mut group = match server_data.get_party(owner).await {
+            Some(group) => group,
+            None => break
+        };
+
+        if group.time_til_auto_del > 0 && group.player_amount() < 2 {
+            group.time_til_auto_del -= 1;
+            if group.time_til_auto_del == 0 {
+                ctx.http.delete_channel(group.text_id as u64).await;
+                ctx.http.delete_channel(group.voice_id as u64).await;
+                ctx.http.delete_role(guild.0, group.role_id as u64).await;
+                ctx.http.delete_message(channel_id, user_message.id.0).await;
+                ctx.http.delete_message(channel_id, bot_message.id.0).await;
+                server_data.delete_party(owner).await;
+                DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+                break
+            } else {
+                server_data.edit_party(owner, group).await;
+                DatabaseServer::insert_or_replace(ctx, server_data.clone()).await;
+            }
+        } else if group.player_amount() > 2 {
+            loop {
+                timer.tick().await;
+                let server_data = DatabaseServer::get_or_insert_new(
+                    ctx,
+                    guild.0 as i64,
+                    None).await;
+                let group = match server_data.get_party(owner).await {
+                    Some(group) => group,
+                    None => break
+                };
+
+                if group.player_amount() < 2 {
+                    break
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+async fn error_builder(
+    ctx: &Context,
+    orginial_msg: &Message,
+    channel: ChannelId,
+    error: PartyError
+) -> CommandResult {
+    let error_msg = channel.send_message(&ctx.http, |cm| {
+        cm.embed(|ce| {
+            ce.title(format!("{}", error));
+            ce.colour(Colour::RED);
+            ce
+        });
+        cm
+    }).await?;
+
+    tokio::time::delay_for(Duration::from_secs(20)).await;
+    error_msg.delete(&ctx.http).await?;
+    orginial_msg.delete(&ctx.http).await?;
 
     Ok(())
 }

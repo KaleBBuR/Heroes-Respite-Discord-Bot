@@ -139,7 +139,7 @@ impl Default for Group {
             voice_id: 0,
             text_id: 0,
             role_id: 0,
-            time_til_auto_del: 0
+            time_til_auto_del: 2
         }
     }
 }
