@@ -7,7 +7,8 @@ use serenity::{
     builder::CreateEmbedAuthor,
     client::Client,
     framework::standard::{
-        Args, CommandResult, StandardFramework, DispatchError,
+        Args, CommandResult, StandardFramework, DispatchError, HelpOptions,
+        help_commands::*, CommandGroup,
         macros::*,
     },
     futures::StreamExt,
@@ -89,7 +90,7 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn guild_delete(&self, _ctx: Context, _incomplete: GuildUnavailable) {
+    async fn guild_delete(&self, _ctx: Context, _incomplete: GuildUnavailable, _: Option<Guild>) {
         let id = _incomplete.id.0;
         match DatabaseServer::delete(&_ctx, id as i64).await {
             Ok(_) => {},
@@ -97,7 +98,7 @@ impl EventHandler for Handler {
         };
     }
 
-    async fn guild_create(&self, _ctx: Context, _guild: Guild) {
+    async fn guild_create(&self, _ctx: Context, _guild: Guild, _: bool) {
         let id = _guild.id.0;
         let owner_id = _guild.owner_id.0;
         DatabaseServer::get_or_insert_new(
@@ -594,4 +595,39 @@ async fn dispatch_error(ctx: &Context, msg: &Message, error: DispatchError) {
             .say(&ctx.http, &format!("Try this again in {} seconds.", duration.as_secs()))
             .await;
     }
+}
+
+// The framework provides two built-in help commands for you to use.
+// But you can also make your own customized help command that forwards
+// to the behaviour of either of them.
+#[help]
+// This replaces the information that a user can pass
+// a command-name as argument to gain specific information about it.
+#[individual_command_tip =
+"Hello!\n\n
+If you want more information about a specific command, just pass the command as argument."]
+// Some arguments require a `{}` in order to replace it with contextual information.
+// In this case our `{}` refers to a command's name.
+#[command_not_found_text = "Could not find: `{}`."]
+// On another note, you can set up the help-menu-filter-behaviour.
+// Here are all possible settings shown on all possible options.
+// First case is if a user lacks permissions for a command, we can hide the command.
+#[lacking_permissions = "Hide"]
+// If the user is nothing but lacking a certain role, we just display it hence our variant is
+// `Nothing`.
+#[lacking_role = "Nothing"]
+// Serenity will automatically analyse and generate a hint/tip explaining the possible
+// cases of ~~strikethrough-commands~~, but only if
+// `strikethrough_commands_tip_in_{dm, guild}` aren't specified.
+// If you pass in a value, it will be displayed instead.
+async fn my_help(
+    context: &Context,
+    msg: &Message,
+    args: Args,
+    help_options: &'static HelpOptions,
+    groups: &[&'static CommandGroup],
+    owners: HashSet<UserId>
+) -> CommandResult {
+    let _ = with_embeds(context, msg, args, help_options, groups, owners).await;
+    Ok(())
 }
