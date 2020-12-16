@@ -1,7 +1,7 @@
 pub mod db;
 pub mod party_groups;
 
-use std::{collections::HashSet, convert::TryFrom, env, fmt, sync::{Arc, Mutex}, time::Duration};
+use std::{collections::HashSet, convert::TryFrom, env, fmt, time::Duration};
 use serenity::{
     async_trait,
     builder::CreateEmbedAuthor,
@@ -46,12 +46,6 @@ impl fmt::Display for PartyError {
             PartyError::PartyOwner => write!(f, "You already own a party. HMPH. NO MORE FOR YOU.")
         }
     }
-}
-
-pub struct PartyTimer;
-
-impl TypeMapKey for PartyTimer {
-    type Value = Arc<Mutex<u32>>;
 }
 
 struct Handler;
@@ -207,7 +201,6 @@ async fn main() {
         let client = ClientDB::with_options(db_client_ops).expect("Could not connect to DB");
         let mut data = bot_client.data.write().await;
         data.insert::<Database>(client);
-        data.insert::<PartyTimer>(Arc::new(Mutex::new(1)));
     }
 
     // Finally, start a single shard, and start listening to events.
